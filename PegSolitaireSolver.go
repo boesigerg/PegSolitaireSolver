@@ -3,9 +3,9 @@ package main
 import (
     "fmt"
     "math/big"
+	"math/bits"
 )
 
-var resultsByBoardState map[uint64][]big.Int
 var lineList [][]int
 var size int
 
@@ -13,7 +13,7 @@ func main() {
 	size = 33
     boardStart := setupBoard(size)
 			
-	finalPegCount := recursiveSolve(boardStart)
+	finalPegCount := layeredSolve(boardStart)
 	
 	for pegs, count := range finalPegCount{
 		if count.Sign() > 0 {
@@ -22,43 +22,50 @@ func main() {
 	}
 }
 
-func recursiveSolve(board uint64) []big.Int {
-	//Skip solving if board position has already been seen
-	if r, solved := resultsByBoardState[board]; solved {
-		return r
-	}
-	
+func layeredSolve(board uint64) []big.Int {
 	result := make([]big.Int, size)
-	moveMade := false
 	
-	//Check each line across game board
-	for _, line := range lineList{
-		//Check 3 spots along the line at time
-		for i := 0; i+2 < len(line); i++ {
-			a, b, c := uint64(1) << line[i], uint64(1) << line[i+1], uint64(1) << line[i+2]
-			
-			//If middle has peg and exactly one other has peg, make move
-			if board&b != 0 && (board&a != 0) != (board&c != 0) {
-				moveMade = true
-				subResult := recursiveSolve(board ^ a ^ b ^ c)
-				for endPegs := range subResult {
-					result[endPegs].Add(&result[endPegs], &subResult[endPegs])
+	// Number of move sequences that reach each board.
+    current := map[uint64]*big.Int{
+        board: big.NewInt(1),
+    }
+	
+	for len(current) > 0 {
+		next := make(map[uint64]*big.Int)
+		
+		for board, ways := range current {
+			moveMade := false
+	
+			//Check each line across game board
+			for _, line := range lineList{
+				//Check 3 spots along the line at time
+				for i := 0; i+2 < len(line); i++ {
+					a, b, c := uint64(1) << line[i], uint64(1) << line[i+1], uint64(1) << line[i+2]
+					
+					//If middle has peg and exactly one other has peg, make move
+					if board&b != 0 && (board&a != 0) != (board&c != 0) {
+						moveMade = true
+						nextBoard := board ^ a ^ b ^ c
+						if existing, ok := next[nextBoard]; ok {
+                            existing.Add(existing, ways)
+                        } else {
+                            next[nextBoard] = new(big.Int).Set(ways)
+                        }
+					}
 				}
 			}
+	
+			//if no moves were made with this board, the game is over
+			if !moveMade {
+				pegs := bits.OnesCount64(board)
+				result[pegs].Add(&result[pegs], ways)
+			}
 		}
+		
+		// Discard the previous layer.
+        current = next
 	}
 	
-	//if no moves were made with this board, the game is over
-	if !moveMade {
-		n := 0
-		//Loop counts number of occupied pegs by removing rightmost set bit each iter
-		for x := board; x != 0; x &= x - 1 {
-			n++
-		}
-		result[n].SetInt64(1)
-	}
-	
-	resultsByBoardState[board] = result
 	return result
 }
 
@@ -91,7 +98,6 @@ func setupBoard(size int) uint64{
 			emptySlot = 16
 	}
 	
-	resultsByBoardState = map[uint64][]big.Int{}
 	return ((uint64(1) << size) - 1) &^ (uint64(1) << emptySlot)
 }
 
